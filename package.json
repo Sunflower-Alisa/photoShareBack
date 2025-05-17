@@ -5,7 +5,7 @@
     "packages/*"
   ],
   "scripts": {
-    "start-server": "npm run --scope server start"
+    "start": "node server.js"
   },
   "dependencies": {
     "axios": "^1.9.0",
@@ -16,6 +16,6 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.2",
-    "mysql2": "^3.14.1"
+    "mysql2": "^3.14.1"    
   }
 }
