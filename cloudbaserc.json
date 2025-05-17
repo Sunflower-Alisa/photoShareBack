@@ -1,0 +1,16 @@
+{
+  "envId": "photo-8gpigsbh9518cc2a",
+  "framework": {
+    "plugins": {
+      "client": {
+        "use": "@cloudbase/framework-plugin-node",
+        "inputs": {
+          "entry": "./server.js",
+          "path": "/",
+          "name": "photo-share-api",
+          "wrapExpress": true
+        }
+      }
+    }
+  }
+}
