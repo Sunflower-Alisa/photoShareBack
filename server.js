@@ -9,8 +9,12 @@ const morgan = require('morgan');
 const aliyunPanService = require('./service/aliyunPanService');
 const path = require('path');
 const CryptoJS = require('crypto-js');
+const cloudbase = require("@cloudbase/node-sdk");
 
-const app = express();
+// const app = express();
+const app = cloudbase.init({
+  env: "photo-8gpigsbh9518cc2a",
+});
 const upload = multer({ dest: 'uploads/' });
 
 // 配置中间件
@@ -50,16 +54,8 @@ app.use(morgan('dev'));
 //   }
 // });
 
-// MySQL数据库连接
-const pool = mysql.createPool({
-  host: 'YOUR_MYSQL_HOST',
-  user: 'YOUR_MYSQL_USER',
-  password: 'YOUR_MYSQL_PASSWORD',
-  database: 'image_sharing',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+
+const db = app.database();
 
 const APPID = 'wxc6634cd42aa9fc03';
 const APPSECRET = 'a56707a4d26ce7b3237427c6e5f2dc63';
@@ -73,7 +69,13 @@ const authenticate = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
+    const users = await db
+      .collection("users")
+      .where({
+        id: decoded.userId
+      })
+      .get();
+    // const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
     if (!users.length) return res.status(401).json({ code: 401, msg: '用户不存在' });
 
     req.user = users[0];
@@ -98,23 +100,28 @@ app.post('/api/login', async (req, res) => {
     // 生成JWT
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
     // 检查用户是否存在
-    const [users] = await pool.query('SELECT * FROM users WHERE openid = ?', [openid]);
-    let user;
+    // const [users] = await pool.query('SELECT * FROM users WHERE openid = ?', [openid]);
+    const users = await db
+      .collection("users")
+      .where({
+        openid: openid
+      })
+      .get();
 
+    let user;
     if (users.length) {
       user = users[0];
     } else {
-      // 新用户注册
-      const [result] = await pool.query(
-        'INSERT INTO users (openid, created_at) VALUES (?, NOW())',
-        [openid]
-      );
-      user = { id: result.insertId, openid };
+      // 如果用户不存在，则创建新用户
+      const result = await db.collection('users').add({
+        openid,
+        created_at: new Date()
+      });
+      user = { id: result.id, openid };
     }
-
     res.json({
       code: 200,
-      data: { openid, token },
+      data: { openid, token,user },
       message: '登录成功'
     });
   } catch (error) {
@@ -125,6 +132,58 @@ app.post('/api/login', async (req, res) => {
     });
   }
 });
+
+// 保存用户信息接口
+router.post('/api/saveUserInfo', async (req, res) => {
+  try {
+    const { code, nickName, avatarUrl } = req.body;
+    
+    // 1. 获取openid和session_key
+    const session = await getWxUserSession(code);
+    
+    // 2. 保存用户信息到数据库
+    const user = await saveUserToDB({
+      openid: session.openid,
+      nickname: nickName,
+      avatar: avatarUrl
+    });
+    
+    res.json({
+      code: 0,
+      data: user,
+      message: '用户信息保存成功'
+    });
+  } catch (error) {
+    console.error('保存用户信息失败:', error.message);
+    res.status(500).json({
+      code: -1,
+      message: error.message
+    });
+  }
+});
+
+// 保存用户信息到数据库
+async function saveUserToDB(userInfo) {
+  // 这里实现你的数据库保存逻辑
+  // 示例代码：
+  const user = {
+    openid: userInfo.openid,
+    nickname: userInfo.nickname,
+    avatar: userInfo.avatar,
+    created_at: new Date()
+  };
+  
+  const res = await db.collection('users')
+    .update({
+      nickname: userInfo.nickname,
+      avatar: userInfo.avatar,
+      created_at: new Date()
+    }).where({
+      openid: userInfo.openid
+    }).get();
+  
+  return res;
+}
 
 
 // 解密用户信息接口
