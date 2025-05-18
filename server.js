@@ -8,6 +8,7 @@ const morgan = require('morgan');
 // const baiduPanService = require('./service/baiduPanService');
 const aliyunPanService = require('./service/aliyunPanService');
 const path = require('path');
+const CryptoJS = require('crypto-js');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
@@ -60,8 +61,10 @@ const pool = mysql.createPool({
   queueLimit: 0
 });
 
+const APPID = 'wxc6634cd42aa9fc03';
+const APPSECRET = 'a56707a4d26ce7b3237427c6e5f2dc63';
 // JWT密钥
-const JWT_SECRET = 'YOUR_JWT_SECRET';
+const JWT_SECRET = 'shiguangcanglyk7925';
 
 // 用户认证中间件
 const authenticate = async (req, res, next) => {
@@ -80,37 +83,90 @@ const authenticate = async (req, res, next) => {
   }
 };
 
-// 路由定义
-
-// 用户登录
+// 用户登录接口
 app.post('/api/login', async (req, res) => {
-  const { code } = req.body; // 微信登录code
+  const { code } = req.body;
 
-  // 这里应该调用微信接口获取openid
-  // 模拟实现
-  const openid = `mock_openid_${Math.random().toString(36).substr(2)}`;
-
-  // 检查用户是否存在
-  const [users] = await pool.query('SELECT * FROM users WHERE openid = ?', [openid]);
-  let user;
-
-  if (users.length) {
-    user = users[0];
-  } else {
-    // 新用户注册
-    const [result] = await pool.query(
-      'INSERT INTO users (openid, created_at) VALUES (?, NOW())',
-      [openid]
+  try {
+    // 向微信服务器请求 openid 和 session_key
+    const response = await axios.get(
+      `https://api.weixin.qq.com/sns/jscode2session?appid=${APPID}&secret=${APPSECRET}&js_code=${code}&grant_type=authorization_code`
     );
-    user = { id: result.insertId, openid };
+
+    const { openid, session_key } = response.data;
+
+    // 生成JWT
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    // 检查用户是否存在
+    const [users] = await pool.query('SELECT * FROM users WHERE openid = ?', [openid]);
+    let user;
+
+    if (users.length) {
+      user = users[0];
+    } else {
+      // 新用户注册
+      const [result] = await pool.query(
+        'INSERT INTO users (openid, created_at) VALUES (?, NOW())',
+        [openid]
+      );
+      user = { id: result.insertId, openid };
+    }
+
+    res.json({
+      code: 200,
+      data: { openid, token },
+      message: '登录成功'
+    });
+  } catch (error) {
+    res.status(500).json({
+      code: 500,
+      message: '登录失败',
+      error: error.message
+    });
   }
-
-  // 生成JWT
-  const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-
-  res.json({ code: 0, data: { token } });
 });
 
+
+// 解密用户信息接口
+app.post('/api/userinfo', async (req, res) => {
+  const { encryptedData, iv, token } = req.body;
+
+  try {
+    // 根据 token 获取 session_key（实际应从数据库或缓存中读取）
+    const session_key = '从缓存或数据库获取的session_key';
+
+    // 解密数据
+    const decoded = decryptData(encryptedData, iv, session_key);
+    const userInfo = JSON.parse(decoded);
+
+    res.json({
+      code: 200,
+      data: userInfo,
+      message: '获取用户信息成功'
+    });
+  } catch (error) {
+    res.status(500).json({
+      code: 500,
+      message: '解密失败',
+      error: error.message
+    });
+  }
+});
+
+// 解密函数
+function decryptData(encryptedData, iv, sessionKey) {
+  const key = CryptoJS.enc.Base64.parse(sessionKey);
+  const ivParsed = CryptoJS.enc.Base64.parse(iv);
+  const encryptedDataParsed = CryptoJS.enc.Base64.parse(encryptedData);
+
+  const decrypted = CryptoJS.AES.decrypt(
+    { ciphertext: encryptedDataParsed },
+    key,
+    { iv: ivParsed, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+  );
+
+  return decrypted.toString(CryptoJS.enc.Utf8);
+}
 
 // 上传图片
 app.post('/api/upload', authenticate, upload.single('image'), async (req, res) => {
